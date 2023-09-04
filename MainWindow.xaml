@@ -1,0 +1,52 @@
+﻿<Window x:Class="HFTProxy.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:HFTProxy"
+        Title="HFTProxy" Height="450" Width="400">
+
+    <Window.DataContext>
+        <local:MainWindowViewModel/>
+    </Window.DataContext>
+
+    <Grid>
+
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Első Grid a gombok számára -->
+        <Grid Grid.Row="0">
+            <Button x:Name="StartButton" Content="Start" Click="StartButton_Click" HorizontalAlignment="Left" VerticalAlignment="Top" Width="75" Height="25"/>
+            <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" HorizontalAlignment="Left" VerticalAlignment="Top" Width="75" Height="25" Margin="80,0,0,0"/>
+            <Button Content="Refresh Config" Click="RefreshConfigButton_Click" HorizontalAlignment="Left" VerticalAlignment="Top" Width="125" Height="25" Margin="160,0,0,0"/>
+            <TextBlock Text="Active Connections" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,30,0,0"/>
+        </Grid>
+
+        <!-- Második Grid a DataGrid számára -->
+        <Grid Grid.Row="1">
+            <DataGrid Name="ActiveConnectionsGrid" AutoGenerateColumns="False" ItemsSource="{Binding ActiveConnections}" HorizontalAlignment="Stretch" Height="300" Margin="10,10,10,10" VerticalAlignment="Top">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="ListeningPort" Width="*" MinWidth="40" Binding="{Binding ListeningPort}"/>
+                    <DataGridTextColumn Header="Destination" Width="*" MinWidth="100" Binding="{Binding DestinationAddress}"/>
+                    <DataGridTextColumn Header="ViaIP" Width="*" MinWidth="80" Binding="{Binding ViaIP}"/>
+                    <DataGridTextColumn Header="Comment" Width="*" MinWidth="80" Binding="{Binding Comment}"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+
+        <!-- Harmadik Grid a megjegyzés (comment) számára -->
+        <Grid Grid.Row="2">
+            <StackPanel Orientation="Vertical">
+                <TextBlock Text="Listening IP: 127.0.0.1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10,0,0,0"/>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="File:" Margin="10 0 0 0"/>
+                    <TextBlock Text="{Binding SelectedConfigFilePath}"/>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
+
