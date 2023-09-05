@@ -258,14 +258,13 @@ namespace HFTProxy
 				catch (IOException ex)
 				{
 					ShowMessageBoxAsync($"cancellationToken.IsCancellationRequested:{cancellationToken.IsCancellationRequested}\n IOException in ForwardStreamAsync: {ex.Message}");
-					Task.Delay(50).Wait();
 					bool ss= cancellationToken.IsCancellationRequested;
-					throw ex; //itt a bibi
+					throw; //itt a bibi
 				}
 				catch (Exception ex)
 				{
 					ShowMessageBoxAsync($"General Exception in ForwardStreamAsync: {ex.Message}");
-					throw ex;
+					throw;
 				}
 			}
 		}
