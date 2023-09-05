@@ -9,15 +9,13 @@
     </Window.DataContext>
 
     <Grid>
-
-
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Első Grid a gombok számára -->
+        <!-- Buttons row -->
         <Grid Grid.Row="0">
             <Button x:Name="StartButton" Content="Start" Click="StartButton_Click" HorizontalAlignment="Left" VerticalAlignment="Top" Width="75" Height="25"/>
             <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" HorizontalAlignment="Left" VerticalAlignment="Top" Width="75" Height="25" Margin="80,0,0,0"/>
@@ -25,7 +23,7 @@
             <TextBlock Text="Active Connections" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,30,0,0"/>
         </Grid>
 
-        <!-- Második Grid a DataGrid számára -->
+        <!-- DataGrid -->
         <Grid Grid.Row="1">
             <DataGrid Name="ActiveConnectionsGrid" AutoGenerateColumns="False" ItemsSource="{Binding ActiveConnections}" HorizontalAlignment="Stretch" Height="300" Margin="10,10,10,10" VerticalAlignment="Top">
                 <DataGrid.Columns>
@@ -37,7 +35,7 @@
             </DataGrid>
         </Grid>
 
-        <!-- Harmadik Grid a megjegyzés (comment) számára -->
+        <!-- comment -->
         <Grid Grid.Row="2">
             <StackPanel Orientation="Vertical">
                 <TextBlock Text="Listening IP: 127.0.0.1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10,0,0,0"/>

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Data.Common;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -26,14 +27,28 @@ namespace HFTProxy
 	/// Start button will start the proxy, and stop button will stop it.
 	/// Refresh button will reload the config file, but keep existing connections.
 	/// The active connections grid shows the connections that are currently active.
+	/// It is running on a powerfull machine, brandwith is not an issue. Latency is the ultimate priority.
+	///
 
 	/// 
 	/// TODO:
-	/// Some kind of a graph that shows the amount of data transferred per second should be added somewhere to see which connections are the most active and which is dead.
-	/// If possible the average latency from the PC to server should be somehow measured and displayed, but without affecting the performance.
 	/// Config file shold be validated before loading. In case of errors, the config file should not be loaded and error message should be displayed in a message box.
+	/// No ConnectionInfo should have the same listening port. It it happens on loadfile, it should be reported as an error, and the config file should not be loaded.
+	/// If it is a refresh, then the existing connection with that listening port should be closed, and the new one should be created according to the new config.
+	/// The active listening ports should be stored somewhere, to detect if a new connection is a refresh or a new connection.
 	/// </summary>
 	/// 
+	public class ErrorHandler 
+	{
+		public void AddException(Exception ex, string function)
+		{
+			//TODO
+		}
+		public void AddError(string message) 
+		{ 
+			//TODO
+		}
+	}
 
 	public class ConnectionInfo
 	{
@@ -52,20 +67,21 @@ namespace HFTProxy
 
 	public class ConfigManager
 	{
-		public static List<ConnectionInfo> LoadConfig(string filePath)
+        public static List<ConnectionInfo> LoadConfig(string filePath)
 		{
 			List<ConnectionInfo> configs = new List<ConnectionInfo>();
 			List<string> errors = new List<string>();
 			string[] lines = File.ReadAllLines(filePath);
 
-			foreach (var line in lines)
+			for (int i = 0; i < lines.Length; i++)
 			{
+				string? line = lines[i];
 				if (line.Trim().StartsWith("#")) continue;  // Skip comments
 
 				string[] parts = line.Split(',');
 				if (parts.Length <= 3)
 				{
-					errors.Add($"Invalid configuration line: {line}");
+					errors.Add($"Invalid configuration line number {i}.");
 					continue;
 				}
 
@@ -78,21 +94,27 @@ namespace HFTProxy
 				}
 				catch (Exception ex)
 				{
-					errors.Add($"Failed to parse line '{line}': {ex.Message}");
+					errors.Add($"Failed to parse line {i}: {ex.Message}");
 				}
+			}
+
+			var duplicatePorts = configs.GroupBy(x => x.ListeningPort).Where(g => g.Count() > 1).Select(y => y.Key).ToList();
+			if (duplicatePorts.Any())
+			{
+				errors.Add($"The following listening ports are duplicated: {string.Join(", ", duplicatePorts)}.");
+				configs.Clear();
 			}
 
 			if (errors.Any())
 			{
 				// Show all errors in a single message box
-				MessageBox.Show($"The following errors were found in the configuration file:\n{string.Join("\n", errors)}. Config file was not loaded.");
+				MessageBox.Show($"Config file was NOT loaded! The following errors were found in the configuration file:\n{string.Join("\n", errors)}.");
+				configs.Clear();
 			}
 
 			return configs;
 		}
-
 	}
-
 
 	public class MainWindowViewModel:INotifyPropertyChanged
 	{
@@ -135,18 +157,15 @@ namespace HFTProxy
 
 	public partial class MainWindow : Window
 	{
+		ErrorHandler errorHandler = new ErrorHandler();
 		private readonly MainWindowViewModel viewModel;
 		private CancellationTokenSource cts;
-		//public ObservableCollection<ConnectionInfo> ActiveConnections { get; set; }
 		IPAddress localhostIP = IPAddress.Parse("127.0.0.1");
 		public MainWindow()
 		{
 			InitializeComponent();
 			viewModel = (MainWindowViewModel)DataContext;
 		}
-
-		private async void ShowMessageBoxAsync(string message) => await Task.Run(() => MessageBox.Show(message));
-
 		private async void StartButton_Click(object sender, RoutedEventArgs e)
 		{
 			OpenFileDialog openFileDialog = new OpenFileDialog();
@@ -158,7 +177,7 @@ namespace HFTProxy
 			//check if file exists
 			if (!System.IO.File.Exists(openFileDialog.FileName))
 			{
-				ShowMessageBoxAsync("File does not exist!");
+				errorHandler.AddError("StartButton_Click - >File does not exist!");
 				return;
 			}
 			viewModel.SelectedConfigFilePath =openFileDialog.FileName;
@@ -185,7 +204,6 @@ namespace HFTProxy
 			StartButton.IsEnabled = true;
 			StopButton.IsEnabled = false;
 		}
-
 		private void RefreshConfigButton_Click(object sender, RoutedEventArgs e)
 		{
 			// Load new configurations
@@ -206,83 +224,67 @@ namespace HFTProxy
 			}
 		}
 
-		private void CloseAndDisposeClients(TcpClient incomingClient, TcpClient outgoingClient, TcpListener listener)
-		{
-			incomingClient?.Close();
-			incomingClient?.Dispose();
-
-			outgoingClient?.Close();
-			outgoingClient?.Dispose();
-
-			//listener?.Stop();
-		}
-
 		private async Task StartProxyAsync(ConnectionInfo config, CancellationToken globalCancellationToken)
 		{
 			TcpListener listener = new TcpListener(localhostIP, config.ListeningPort);
 			listener.Start();
 
-			using (CancellationTokenSource localCts = new CancellationTokenSource())
+			try
 			{
-				CancellationToken linkedCts = CancellationTokenSource.CreateLinkedTokenSource(globalCancellationToken, localCts.Token).Token;
-
-				try
+				while (!globalCancellationToken.IsCancellationRequested)
 				{
-					while (!linkedCts.IsCancellationRequested)
-					{
-						TcpClient incomingClient = null;
-						TcpClient outgoingClient = null;
+					// Accept incoming client
+					TcpClient incomingClient = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+					incomingClient.Client.NoDelay = true;
 
-						try
-						{
-							incomingClient = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
-							incomingClient.Client.NoDelay = true;
-
-							NetworkStream incomingStream = incomingClient.GetStream();
-
-							IPEndPoint localEndPoint = new IPEndPoint(config.ViaIP, 0);
-							outgoingClient = new TcpClient(localEndPoint);
-
-							Dispatcher.Invoke(() => viewModel.ActiveConnections.Add(config));
-
-							await outgoingClient.ConnectAsync(config.DestinationAddress.Address, config.DestinationAddress.Port).ConfigureAwait(false);
-							outgoingClient.Client.NoDelay = true;
-
-							NetworkStream outgoingStream = outgoingClient.GetStream();
-
-							Task task1 = ForwardStreamAsync(incomingStream, outgoingStream, linkedCts);
-							Task task2 = ForwardStreamAsync(outgoingStream, incomingStream, linkedCts);
-
-							await Task.WhenAny(task1, task2).ConfigureAwait(false);
-
-							if (task1.IsFaulted) throw task1.Exception;
-							if (task2.IsFaulted) throw task2.Exception;
-						}
-						catch (SocketException se)
-						{
-							ShowMessageBoxAsync($"Socket Exception: {se.Message}");
-						}
-						catch (Exception ex)
-						{
-							localCts.Cancel();
-							ShowMessageBoxAsync($"General Exception: {ex.Message}");
-						}
-						finally
-						{
-							CloseAndDisposeClients(incomingClient, outgoingClient, null);
-							Dispatcher.Invoke(() => viewModel.ActiveConnections.Remove(config));
-						}
-					}
+					// Start the forwarding logic in a separate task
+					var task = HandleClientAsync(incomingClient, config, globalCancellationToken);
 				}
-				catch (OperationCanceledException oce)
-				{
-					ShowMessageBoxAsync(oce.Message);
-				}
-				finally
-				{
-					CloseAndDisposeClients(null, null, listener);
-					Dispatcher.Invoke(() => viewModel.ActiveConnections.Remove(config));
-				}
+			}
+			catch (Exception ex)
+			{
+				errorHandler.AddException(ex, "StartProxyAsync");
+			}
+			finally
+			{
+				listener.Stop();
+			}
+		}
+
+		private async Task HandleClientAsync(TcpClient incomingClient, ConnectionInfo config, CancellationToken cancellationToken)
+		{
+			TcpClient outgoingClient = null;
+
+			try
+			{
+				Dispatcher.Invoke(() => viewModel.ActiveConnections.Add(config));
+
+				// Initialize and connect outgoing client
+				IPEndPoint localEndPoint = new IPEndPoint(config.ViaIP, 0);
+				outgoingClient = new TcpClient(localEndPoint);
+				await outgoingClient.ConnectAsync(config.DestinationAddress.Address, config.DestinationAddress.Port);
+				outgoingClient.Client.NoDelay = true;
+
+				NetworkStream incomingStream = incomingClient.GetStream();
+				NetworkStream outgoingStream = outgoingClient.GetStream();
+
+				// Start forwarding streams
+				Task forwardToOutgoing = ForwardStreamAsync(incomingStream, outgoingStream, cancellationToken);
+				Task forwardToIncoming = ForwardStreamAsync(outgoingStream, incomingStream, cancellationToken);
+
+				await Task.WhenAny(forwardToOutgoing, forwardToIncoming);
+			}
+			catch (Exception ex)
+			{
+				errorHandler.AddException(ex, "HandleClientAsync");
+			}
+			finally
+			{
+				incomingClient?.Close();
+				incomingClient?.Dispose();
+				outgoingClient?.Close();
+				outgoingClient?.Dispose();
+				Dispatcher.Invoke(() => viewModel.ActiveConnections.Remove(config));
 			}
 		}
 
@@ -304,17 +306,13 @@ namespace HFTProxy
 					}
 					await outgoingStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
 				}
-				catch (IOException ex)
-				{
-					ShowMessageBoxAsync($"cancellationToken.IsCancellationRequested:{cancellationToken.IsCancellationRequested}\n IOException in ForwardStreamAsync: {ex.Message}");
-					throw; 
-				}
 				catch (Exception ex)
 				{
-					ShowMessageBoxAsync($"General Exception in ForwardStreamAsync: {ex.Message}");
-					throw;
+					errorHandler.AddException(ex, "ForwardStreamAsync");
+					throw; 
 				}
 			}
+			var torold = 1;
 		}
 	}
 }
