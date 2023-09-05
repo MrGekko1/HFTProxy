@@ -84,10 +84,6 @@ namespace HFTProxy
 		{
 			InitializeComponent();
 			viewModel = (MainWindowViewModel)DataContext;
-
-			var breakpoint = 1;
-			//ActiveConnections = new ObservableCollection<ConnectionInfo>();
-			//ActiveConnectionsGrid.ItemsSource = ActiveConnections;
 		}
 
 		private async void ShowMessageBoxAsync(string message)
@@ -160,7 +156,7 @@ namespace HFTProxy
 			incomingClient?.Close();
 			outgoingClient?.Close();
 			listener?.Stop();
-			listener?.Start();
+			//listener?.Start();
 
 			incomingClient?.Dispose();
 			outgoingClient?.Dispose();
