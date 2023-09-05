@@ -5,8 +5,10 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -24,8 +26,7 @@ namespace HFTProxy
 	/// Start button will start the proxy, and stop button will stop it.
 	/// Refresh button will reload the config file, but keep existing connections.
 	/// The active connections grid shows the connections that are currently active.
-	/// 
-	/// 
+
 	/// 
 	/// TODO:
 	/// Some kind of a graph that shows the amount of data transferred per second should be added somewhere to see which connections are the most active and which is dead.
@@ -33,6 +34,64 @@ namespace HFTProxy
 	/// Config file shold be validated before loading. In case of errors, the config file should not be loaded and error message should be displayed in a message box.
 	/// </summary>
 	/// 
+
+	public class ConnectionInfo
+	{
+		public int ListeningPort { get; init; }
+		public IPEndPoint DestinationAddress { get; init; }
+		public IPAddress ViaIP { get; init; }
+		public string Comment { get; init; }
+		public ConnectionInfo(int listeningPort, IPEndPoint destinationAddress, IPAddress viaIP, string comment)
+		{
+			this.ListeningPort = listeningPort;
+			this.DestinationAddress = destinationAddress;
+			this.ViaIP = viaIP;
+			this.Comment = comment;
+		}
+	}
+
+	public class ConfigManager
+	{
+		public static List<ConnectionInfo> LoadConfig(string filePath)
+		{
+			List<ConnectionInfo> configs = new List<ConnectionInfo>();
+			List<string> errors = new List<string>();
+			string[] lines = File.ReadAllLines(filePath);
+
+			foreach (var line in lines)
+			{
+				if (line.Trim().StartsWith("#")) continue;  // Skip comments
+
+				string[] parts = line.Split(',');
+				if (parts.Length <= 3)
+				{
+					errors.Add($"Invalid configuration line: {line}");
+					continue;
+				}
+
+				string comment = parts.Length < 4 ? string.Empty : parts[3];
+
+				try
+				{
+					ConnectionInfo config = new ConnectionInfo(int.Parse(parts[0]), IPEndPoint.Parse(parts[1]), IPAddress.Parse(parts[2]), comment);
+					configs.Add(config);
+				}
+				catch (Exception ex)
+				{
+					errors.Add($"Failed to parse line '{line}': {ex.Message}");
+				}
+			}
+
+			if (errors.Any())
+			{
+				// Show all errors in a single message box
+				MessageBox.Show($"The following errors were found in the configuration file:\n{string.Join("\n", errors)}. Config file was not loaded.");
+			}
+
+			return configs;
+		}
+
+	}
 
 
 	public class MainWindowViewModel:INotifyPropertyChanged
@@ -86,10 +145,7 @@ namespace HFTProxy
 			viewModel = (MainWindowViewModel)DataContext;
 		}
 
-		private async void ShowMessageBoxAsync(string message)
-		{
-			await Task.Run(() => MessageBox.Show(message));
-		}
+		private async void ShowMessageBoxAsync(string message) => await Task.Run(() => MessageBox.Show(message));
 
 		private async void StartButton_Click(object sender, RoutedEventArgs e)
 		{
@@ -107,17 +163,16 @@ namespace HFTProxy
 			}
 			viewModel.SelectedConfigFilePath =openFileDialog.FileName;
 
-			// Initialize CancellationTokenSource
 			cts = new CancellationTokenSource();
 
-			// Load configurations
 			List<ConnectionInfo> configs = ConfigManager.LoadConfig(openFileDialog.FileName);
+			List<Task> tasks = new List<Task>();
 
-			// Initialize TCP connections based on configurations
 			foreach (var config in configs)
 			{
 				// Start proxy logic asynchronously for each configuration
-				_ = StartProxyAsync(config, cts.Token);
+				var task = StartProxyAsync(config, cts.Token);
+				tasks.Add(task);
 			}
 
 			StartButton.IsEnabled = false;
@@ -134,7 +189,7 @@ namespace HFTProxy
 		private void RefreshConfigButton_Click(object sender, RoutedEventArgs e)
 		{
 			// Load new configurations
-			List<ConnectionInfo> configs = ConfigManager.LoadConfig("config.txt");
+			List<ConnectionInfo> configs = ConfigManager.LoadConfig(viewModel.SelectedConfigFilePath);
 			if (configs.Count == 0) return;
 
 			// Stop existing connections
@@ -154,12 +209,12 @@ namespace HFTProxy
 		private void CloseAndDisposeClients(TcpClient incomingClient, TcpClient outgoingClient, TcpListener listener)
 		{
 			incomingClient?.Close();
-			outgoingClient?.Close();
-			listener?.Stop();
-			//listener?.Start();
-
 			incomingClient?.Dispose();
+
+			outgoingClient?.Close();
 			outgoingClient?.Dispose();
+
+			//listener?.Stop();
 		}
 
 		private async Task StartProxyAsync(ConnectionInfo config, CancellationToken globalCancellationToken)
@@ -175,15 +230,19 @@ namespace HFTProxy
 				{
 					while (!linkedCts.IsCancellationRequested)
 					{
-						TcpClient incomingClient = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
-						incomingClient.Client.NoDelay = true;
-
-						NetworkStream incomingStream = incomingClient.GetStream();
+						TcpClient incomingClient = null;
+						TcpClient outgoingClient = null;
 
 						try
 						{
+							incomingClient = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+							incomingClient.Client.NoDelay = true;
+
+							NetworkStream incomingStream = incomingClient.GetStream();
+
 							IPEndPoint localEndPoint = new IPEndPoint(config.ViaIP, 0);
-							TcpClient outgoingClient = new TcpClient(localEndPoint);
+							outgoingClient = new TcpClient(localEndPoint);
+
 							Dispatcher.Invoke(() => viewModel.ActiveConnections.Add(config));
 
 							await outgoingClient.ConnectAsync(config.DestinationAddress.Address, config.DestinationAddress.Port).ConfigureAwait(false);
@@ -191,29 +250,27 @@ namespace HFTProxy
 
 							NetworkStream outgoingStream = outgoingClient.GetStream();
 
-							try
-							{
-								await Task.WhenAll(
-									ForwardStreamAsync(incomingStream, outgoingStream, linkedCts),
-									ForwardStreamAsync(outgoingStream, incomingStream, linkedCts)
-								).ConfigureAwait(false);
-								var torold = 1;
-							}
-							catch (IOException ex)
-							{
-								localCts.Cancel();
-								CloseAndDisposeClients(incomingClient, outgoingClient, listener);
-							}
-							finally
-							{
-								CloseAndDisposeClients(incomingClient, outgoingClient, listener);
-								Dispatcher.Invoke(() => viewModel.ActiveConnections.Remove(config));
-							}
+							Task task1 = ForwardStreamAsync(incomingStream, outgoingStream, linkedCts);
+							Task task2 = ForwardStreamAsync(outgoingStream, incomingStream, linkedCts);
+
+							await Task.WhenAny(task1, task2).ConfigureAwait(false);
+
+							if (task1.IsFaulted) throw task1.Exception;
+							if (task2.IsFaulted) throw task2.Exception;
+						}
+						catch (SocketException se)
+						{
+							ShowMessageBoxAsync($"Socket Exception: {se.Message}");
 						}
 						catch (Exception ex)
 						{
 							localCts.Cancel();
-							ShowMessageBoxAsync(ex.Message);
+							ShowMessageBoxAsync($"General Exception: {ex.Message}");
+						}
+						finally
+						{
+							CloseAndDisposeClients(incomingClient, outgoingClient, null);
+							Dispatcher.Invoke(() => viewModel.ActiveConnections.Remove(config));
 						}
 					}
 				}
@@ -223,11 +280,8 @@ namespace HFTProxy
 				}
 				finally
 				{
-					listener.Stop();
-					Dispatcher.Invoke(() =>
-					{
-						viewModel.ActiveConnections.Remove(config);
-					});
+					CloseAndDisposeClients(null, null, listener);
+					Dispatcher.Invoke(() => viewModel.ActiveConnections.Remove(config));
 				}
 			}
 		}
@@ -236,7 +290,6 @@ namespace HFTProxy
 		{
 			byte[] buffer = new byte[1024];
 			int bytesRead;
-
 
 			while (!cancellationToken.IsCancellationRequested)
 			{
@@ -254,8 +307,7 @@ namespace HFTProxy
 				catch (IOException ex)
 				{
 					ShowMessageBoxAsync($"cancellationToken.IsCancellationRequested:{cancellationToken.IsCancellationRequested}\n IOException in ForwardStreamAsync: {ex.Message}");
-					bool ss= cancellationToken.IsCancellationRequested;
-					throw; //itt a bibi
+					throw; 
 				}
 				catch (Exception ex)
 				{
@@ -264,6 +316,5 @@ namespace HFTProxy
 				}
 			}
 		}
-
 	}
 }
