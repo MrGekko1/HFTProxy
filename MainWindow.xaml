@@ -17,10 +17,17 @@
 
         <!-- Buttons row -->
         <Grid Grid.Row="0">
-            <Button x:Name="StartButton" Content="Start" Click="StartButton_Click" HorizontalAlignment="Left" VerticalAlignment="Top" Width="75" Height="25"/>
-            <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" HorizontalAlignment="Left" VerticalAlignment="Top" Width="75" Height="25" Margin="80,0,0,0"/>
-            <Button Content="Refresh Config" Click="RefreshConfigButton_Click" HorizontalAlignment="Left" VerticalAlignment="Top" Width="125" Height="25" Margin="160,0,0,0"/>
-            <TextBlock Text="Active Connections" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,30,0,0"/>
+            <StackPanel Orientation="Vertical">
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="StartButton" Content="Start" Click="StartButton_Click" />
+                    <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" Margin="10,0,0,0"/>
+                    <Button Content="Refresh Config" Click="RefreshConfigButton_Click" Margin="10,0,0,0"/>
+                    <TextBlock Name="TextBlockErrorCount" Text="Uncleared Errors: 0" Margin="20 0 0 0"/>
+                    <Button Name="ButtonClearErrors" FontSize="8" Content="Clear&#x0a;Errors" Click="ButtonClearErrors_Click"/>
+                    <Button Name="ButtonOpenLogFile" FontSize="8" Content="Open&#x0a;Log File" Click="ButtonOpenLogFile_Click"/>
+                </StackPanel>
+            <TextBlock Text="Active Connections" />
+            </StackPanel>
         </Grid>
 
         <!-- DataGrid -->
